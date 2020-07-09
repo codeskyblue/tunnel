@@ -296,15 +296,7 @@ func (s *Server) handleWSConn(w http.ResponseWriter, r *http.Request, ident stri
 		return nonil(err, stream.Close())
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go s.proxy(&wg, conn, stream)
-	go s.proxy(&wg, stream, conn)
-
-	wg.Wait()
-
-	return nonil(stream.Close(), conn.Close())
+	return s.pipeTwoWay(conn, stream)
 }
 
 func (s *Server) handleTCPConn(conn net.Conn) error {
@@ -313,29 +305,39 @@ func (s *Server) handleTCPConn(conn net.Conn) error {
 		return fmt.Errorf("no virtual address available for %s", conn.LocalAddr())
 	}
 
-	_, port, err := parseHostPort(conn.LocalAddr().String())
-	if err != nil {
-		return err
-	}
+	// _, port, err := parseHostPort(conn.LocalAddr().String())
+	// if err != nil {
+	// 	return err
+	// }
 
+	// connect to remote port
+	port, exists := s.virtualAddrs.identifiers[ident]
+	if !exists {
+		panic("port mapping missing")
+	}
 	stream, err := s.dial(ident, proto.TCP, port)
 	if err != nil {
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go s.proxy(&wg, conn, stream)
-	go s.proxy(&wg, stream, conn)
-
-	wg.Wait()
-
-	return nonil(stream.Close(), conn.Close())
+	return s.pipeTwoWay(conn, stream)
 }
 
-func (s *Server) proxy(wg *sync.WaitGroup, dst, src net.Conn) {
-	defer wg.Done()
+func (s *Server) pipeTwoWay(src, dst net.Conn) error {
+	done := make(chan interface{}, 2)
+	go s.proxy(done, src, dst)
+	go s.proxy(done, dst, src)
+
+	<-done
+	defer func() {
+		<-done
+		s.log.Debug("tunneling finished %s <-> %s", src.RemoteAddr(), dst.RemoteAddr())
+	}()
+	return nonil(src.Close(), dst.Close())
+}
+
+func (s *Server) proxy(done chan interface{}, dst, src net.Conn) {
+	defer func() { done <- nil }()
 
 	s.log.Debug("tunneling %s -> %s", src.RemoteAddr(), dst.RemoteAddr())
 	n, err := io.Copy(dst, src)
@@ -393,9 +395,11 @@ func (s *Server) dial(identifier string, p proto.Type, port int) (net.Conn, erro
 // tunnel TCP connections.
 func (s *Server) controlHandler(w http.ResponseWriter, r *http.Request) (ctErr error) {
 	identifier := r.Header.Get(proto.ClientIdentifierHeader)
-	_, ok := s.getHost(identifier)
-	if !ok {
-		return fmt.Errorf("no host associated for identifier %s. please use server.AddHost()", identifier)
+
+	if !s.virtualAddrs.CheckIdentifier(identifier) {
+		if _, ok := s.getHost(identifier); !ok {
+			return fmt.Errorf("no host associated for identifier %s. please use server.AddHost() or server.AddAddr()", identifier)
+		}
 	}
 
 	ct, ok := s.getControl(identifier)
@@ -600,8 +604,10 @@ func (s *Server) DeleteHost(host string) {
 //
 // If l listens on multiple interfaces it's desirable to call AddAddr multiple
 // times with the same l value but different ip one.
-func (s *Server) AddAddr(l net.Listener, ip net.IP, identifier string) {
-	s.virtualAddrs.Add(l, ip, identifier)
+//
+// remotePort is used to dial tunnel-client (ssx: new added)
+func (s *Server) AddAddr(l net.Listener, remotePort int, ip net.IP, identifier string) {
+	s.virtualAddrs.Add(l, remotePort, ip, identifier)
 }
 
 // DeleteAddr stops listening for connections on the given listener.

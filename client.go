@@ -435,6 +435,7 @@ func (c *Client) connect(identifier, serverAddr string) error {
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
 	remoteURL := controlURL(conn)
 	c.log.Debug("CONNECT to %q", remoteURL)

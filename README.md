@@ -34,7 +34,12 @@ import (
 func main() {
 	cfg := &tunnel.ServerConfig{}
 	server, _ := tunnel.NewServer(cfg)
+	
 	server.AddHost("sub.example.com", "1234")
+
+	lis, _ := net.Listen("tcp", ":5000")
+	server.AddAddr(lis, 3000, nil, "abcd") // 3000 is remote port
+
 	http.ListenAndServe(":80", server)
 }
 ```

@@ -29,9 +29,10 @@ type vaddrOptions struct {
 type vaddrStorage struct {
 	*vaddrOptions
 
-	listeners map[net.Listener]*listener
-	ports     map[int]string    // port-based routing: maps port number to identifier
-	ips       map[string]string // ip-based routing: maps ip address to identifier
+	listeners   map[net.Listener]*listener
+	identifiers map[string]int    // identifier map to remote port (ssx: new added)
+	ports       map[int]string    // port-based routing: maps port number to identifier
+	ips         map[string]string // ip-based routing: maps ip address to identifier (ssx: we not using it now)
 
 	mu sync.RWMutex
 }
@@ -41,6 +42,7 @@ func newVirtualAddrs(opts *vaddrOptions) *vaddrStorage {
 		vaddrOptions: opts,
 		listeners:    make(map[net.Listener]*listener),
 		ports:        make(map[int]string),
+		identifiers:  make(map[string]int),
 		ips:          make(map[string]string),
 	}
 }
@@ -89,7 +91,7 @@ func (l *listener) stop() {
 	}
 }
 
-func (vaddr *vaddrStorage) Add(l net.Listener, ip net.IP, ident string) {
+func (vaddr *vaddrStorage) Add(l net.Listener, remotePort int, ip net.IP, ident string) {
 	vaddr.mu.Lock()
 	defer vaddr.mu.Unlock()
 
@@ -104,6 +106,7 @@ func (vaddr *vaddrStorage) Add(l net.Listener, ip net.IP, ident string) {
 		lis.ips[ip.String()] = struct{}{}
 		vaddr.ips[ip.String()] = ident
 	} else {
+		vaddr.identifiers[ident] = remotePort
 		vaddr.ports[mustPort(l)] = ident
 	}
 }
@@ -125,8 +128,9 @@ func (vaddr *vaddrStorage) Delete(l net.Listener, ip net.IP) {
 
 		stop = len(lis.ips) == 0
 	} else {
-		delete(vaddr.ports, mustPort(l))
-
+		listenPort := mustPort(l)
+		delete(vaddr.identifiers, vaddr.ports[listenPort])
+		delete(vaddr.ports, listenPort)
 		stop = true
 	}
 
@@ -136,6 +140,14 @@ func (vaddr *vaddrStorage) Delete(l net.Listener, ip net.IP) {
 		lis.stop()
 		delete(vaddr.listeners, l)
 	}
+}
+
+func (vaddr *vaddrStorage) CheckIdentifier(ident string) bool {
+	vaddr.mu.RLock()
+	defer vaddr.mu.RUnlock()
+
+	_, ok := vaddr.identifiers[ident]
+	return ok
 }
 
 func (vaddr *vaddrStorage) newListener(l net.Listener) *listener {
