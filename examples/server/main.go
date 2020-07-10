@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/koding/tunnel"
+	"github.com/koding/tunnel/proto"
 )
 
 func getFreePort() (port int, err error) {
@@ -84,7 +86,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/add/tcptunnel", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/ktunnel/status", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "IMOK")
+	})
+
+	http.HandleFunc("/ktunnel/add", func(w http.ResponseWriter, r *http.Request) {
 		freePort, err := getFreePort()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -122,7 +128,7 @@ func main() {
 		w.Write(jsonData)
 		// server.DeleteAddr()
 	})
-	http.Handle("/", server)
+	http.HandleFunc(proto.ControlPath, server.ServeHTTP) // path:/ktunnel/_controlPath/
 
 	http.ListenAndServe(*pAddr, nil)
 }

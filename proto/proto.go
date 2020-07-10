@@ -3,7 +3,7 @@ package proto
 
 const (
 	// ControlPath is http.Handler url path for control connection.
-	ControlPath = "/_controlPath/"
+	ControlPath = "/ktunnel/_controlPath/"
 
 	// ClientIdentifierHeader is header carrying information about tunnel identifier.
 	ClientIdentifierHeader = "X-KTunnel-Identifier"

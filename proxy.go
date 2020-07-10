@@ -73,11 +73,11 @@ func Join(local, remote net.Conn, log logging.Logger) {
 		defer func() { done <- nil }()
 
 		log.Debug("proxing %s -> %s", src.RemoteAddr(), dst.RemoteAddr())
-
-		n, err := io.Copy(dst, src)
-		if err != nil {
-			log.Error("%s: copy error: %s", side, err)
-		}
+		n, _ := io.Copy(dst, src)
+		// n, err :=
+		// if err != nil {
+		// 	log.Error("%s: copy error: %s", side, err)
+		// }
 		log.Debug("done proxing %s -> %s: %d bytes", src.RemoteAddr(), dst.RemoteAddr(), n)
 	}
 

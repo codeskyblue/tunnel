@@ -13,19 +13,26 @@ import (
 
 func requestIdentifier(serverAddr string, port int) (identifier string, err error) {
 	defer http.DefaultClient.CloseIdleConnections()
-	resp, err := http.Get(fmt.Sprintf("http://%s/add/tcptunnel?localPort=%d", serverAddr, port))
+
+	url := "http://%s/ktunnel/add?localPort=%d"
+	// url = "http://%s/add/tunnel?localPort=%d"
+
+	resp, err := http.Get(fmt.Sprintf(url, serverAddr, port))
 	if err != nil {
 		return "", err
 	}
+	defer resp.Body.Close()
 	var v struct {
 		Port       int    `json:"port"`
 		Host       string `json:"host"`
 		Identifier string `json:"identifier"`
 		LocalPort  int    `json:"localPort"`
 	}
-	// log.Println(resp.)
 	content, _ := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("StatusCode expect 200, got %d", resp.StatusCode)
+	}
 
 	json.Unmarshal(content, &v)
 
