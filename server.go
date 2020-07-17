@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -423,9 +424,16 @@ func (s *Server) controlHandler(w http.ResponseWriter, r *http.Request) (ctErr e
 		return fmt.Errorf("hijack not possible: %s", err)
 	}
 
-	if _, err := io.WriteString(conn, "HTTP/1.1 "+proto.Connected+"\n\n"); err != nil {
+	s.log.Debug("Writing Connected response")
+	if _, err := io.WriteString(conn, strings.Join([]string{
+		"HTTP/1.1 101 Switching Protocols",
+		"Server: ktunnel",
+		"Upgrade: websocket",
+		"Connection: Upgrade"}, "\n")+"\r\n\r\n"); err != nil {
+		// if _, err := io.WriteString(conn, "HTTP/1.1 "+proto.Connected+"\r\n\r\n"); err != nil {
 		return fmt.Errorf("error writing response: %s", err)
 	}
+	conn.Write(nil) // force flush
 
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return fmt.Errorf("error setting connection deadline: %s", err)
@@ -687,8 +695,8 @@ func copyHeader(dst, src http.Header) {
 // checkConnect checks whether the incoming request is HTTP CONNECT method.
 func (s *Server) checkConnect(fn func(w http.ResponseWriter, r *http.Request) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "CONNECT" {
-			http.Error(w, "405 must CONNECT\n", http.StatusMethodNotAllowed)
+		if r.Method != "GET" {
+			http.Error(w, "405 must GET\n", http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -746,6 +754,13 @@ func nonil(err ...error) error {
 	return nil
 }
 
+type logFormatter struct{}
+
+// Format outputs a message like "2014-02-28 18:15:57 [example] INFO     something happened"
+func (f *logFormatter) Format(rec *logging.Record) string {
+	return fmt.Sprintf("%s %s:%d [%s] %-8s %s", fmt.Sprint(rec.Time)[:19], filepath.Base(rec.Filename), rec.Line, rec.LoggerName, logging.LevelNames[rec.Level], fmt.Sprintf(rec.Format, rec.Args...))
+}
+
 func newLogger(name string, debug bool) logging.Logger {
 	log := logging.NewLogger(name)
 	logHandler := logging.NewWriterHandler(os.Stderr)
@@ -755,6 +770,7 @@ func newLogger(name string, debug bool) logging.Logger {
 	if debug {
 		log.SetLevel(logging.DEBUG)
 		logHandler.SetLevel(logging.DEBUG)
+		logHandler.SetFormatter(&logFormatter{})
 	}
 
 	return log

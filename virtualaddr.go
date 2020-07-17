@@ -48,6 +48,7 @@ func newVirtualAddrs(opts *vaddrOptions) *vaddrStorage {
 }
 
 func (l *listener) serve() {
+	defer l.Close()
 	for {
 		conn, err := l.Accept()
 		if err != nil {

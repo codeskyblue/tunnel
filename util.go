@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -118,4 +119,26 @@ func scheme(conn net.Conn) (scheme string) {
 	}
 
 	return
+}
+
+type hijactRW struct {
+	net.Conn
+	bufrw *bufio.ReadWriter
+}
+
+func (this *hijactRW) Write(data []byte) (int, error) {
+	nn, err := this.bufrw.Write(data)
+	this.bufrw.Flush()
+	return nn, err
+}
+
+func (this *hijactRW) Read(p []byte) (int, error) {
+	return this.bufrw.Read(p)
+}
+
+func newHijackReadWriteCloser(conn net.Conn, bufrw *bufio.ReadWriter) net.Conn {
+	return &hijactRW{
+		bufrw: bufrw,
+		Conn:  conn,
+	}
 }

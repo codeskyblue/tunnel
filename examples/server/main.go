@@ -67,6 +67,13 @@ func GetRemoteAddr(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+func renderJSON(w http.ResponseWriter, data interface{}) {
+	jsonData, _ := json.Marshal(data)
+	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(jsonData)))
+	w.Write(jsonData)
+}
+
 func main() {
 	pAddr := flag.String("addr", ":5000", "listen address")
 	pDebug := flag.Bool("debug", false, "debug mode")
@@ -90,6 +97,8 @@ func main() {
 		io.WriteString(w, "IMOK")
 	})
 
+	ident2listeners := make(map[string]net.Listener, 0)
+
 	http.HandleFunc("/ktunnel/add", func(w http.ResponseWriter, r *http.Request) {
 		freePort, err := getFreePort()
 		if err != nil {
@@ -109,24 +118,42 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		server.AddAddr(lis, localPort, nil, identifier)
-		jsonData, _ := json.Marshal(map[string]interface{}{
-			"port":       freePort,
-			"host":       localIpAddress,
-			"localPort":  localPort,
-			"identifier": identifier,
-		})
+		ident2listeners[identifier] = lis
 
 		remoteAddr := GetRemoteAddr(r)
 		rHost, _, _ := net.SplitHostPort(remoteAddr)
 
 		log.Printf("New tunnel request from %s:%d", rHost, localPort)
 
-		w.Header().Set("Content-Type", "application/json;charset=UTF-8")
-		w.Header().Set("Content-Length", strconv.Itoa(len(jsonData)))
-		w.Write(jsonData)
-		// server.DeleteAddr()
+		renderJSON(w, map[string]interface{}{
+			"port":       freePort,
+			"host":       localIpAddress,
+			"localPort":  localPort,
+			"identifier": identifier,
+		})
+	})
+
+	http.HandleFunc("/ktunnel/del", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			http.Error(w, "405 must DELETE\n", http.StatusMethodNotAllowed)
+			return
+		}
+		identifier := r.FormValue("identifier")
+		if identifier == "" {
+			http.Error(w, "identifier is empty\n", http.StatusBadRequest)
+			return
+		}
+		lis, exists := ident2listeners[identifier]
+		if !exists {
+			http.Error(w, "identifier not exists\n", http.StatusBadRequest)
+			return
+		}
+		server.DeleteAddr(lis, nil)
+		log.Printf("Identifier %s deleted", identifier)
+		renderJSON(w, map[string]interface{}{
+			"success": true,
+		})
 	})
 	http.HandleFunc(proto.ControlPath, server.ServeHTTP) // path:/ktunnel/_controlPath/
 

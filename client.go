@@ -437,30 +437,36 @@ func (c *Client) connect(identifier, serverAddr string) error {
 	}
 	defer conn.Close()
 
-	remoteURL := controlURL(conn)
-	c.log.Debug("CONNECT to %q", remoteURL)
-	req, err := http.NewRequest("CONNECT", remoteURL, nil)
+	remoteURL := scheme(conn) + "://" + serverAddr + proto.ControlPath
+	c.log.Debug("GET to %q", remoteURL)
+	req, err := http.NewRequest("GET", remoteURL, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request to %s: %s", remoteURL, err)
 	}
 
+	// Pretend as websocket request
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set(proto.ClientIdentifierHeader, identifier)
 
 	c.log.Debug("Writing request to TCP: %+v", req)
 
 	if err := req.Write(conn); err != nil {
-		return fmt.Errorf("writing CONNECT request to %s failed: %s", req.URL, err)
+		return fmt.Errorf("writing GET request to %s failed: %s", req.URL, err)
 	}
 
 	c.log.Debug("Reading response from TCP")
 
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	bufReader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(bufReader, req)
 	if err != nil {
-		return fmt.Errorf("reading CONNECT response from %s failed: %s", req.URL, err)
+		return fmt.Errorf("reading GET response from %s failed: %s", req.URL, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK || resp.Status != proto.Connected {
+	if resp.StatusCode != http.StatusSwitchingProtocols { //}.StatusCode != http.StatusOK || resp.Status != proto.Connected {
 		out, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("tunnel server error: status=%d, error=%s", resp.StatusCode, err)
@@ -471,7 +477,9 @@ func (c *Client) connect(identifier, serverAddr string) error {
 
 	c.ctrlWg.Wait() // wait until previous listenControl observes disconnection
 
-	c.session, err = yamux.Client(conn, c.yamuxConfig)
+	bufrw := bufio.NewReadWriter(bufReader, bufio.NewWriter(conn))
+	hjconn := newHijackReadWriteCloser(conn, bufrw)
+	c.session, err = yamux.Client(hjconn, c.yamuxConfig)
 	if err != nil {
 		return fmt.Errorf("session initialization failed: %s", err)
 	}
